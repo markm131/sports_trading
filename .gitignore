@@ -1,0 +1,150 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.code-workspace
+
+# Environment variables & secrets
+.env
+.env.local
+*.pem
+*.key
+config/credentials.json
+secrets/
+
+# Certificates (Betfair)
+certs/
+*.crt
+*.p12
+
+# Data files (don't commit large CSVs or downloaded data)
+data/raw/**/*.csv
+data/raw/**/*.xlsx
+data/raw/**/*.json
+data/processed/**/*.csv
+data/processed/**/*.xlsx
+data/processed/**/*.json
+data/historical/
+data/backups/
+# But keep the directory structure
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/raw/**/.gitkeep
+!data/processed/**/.gitkeep
+
+# Books & PDFs (copyrighted materials)
+books/
+*.pdf
+*.epub
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Logs
+logs/
+*.log
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+*.ipynb
+# Optionally keep example notebooks
+!notebooks/examples/*.ipynb
+
+# Operating System
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Backup files
+*.bak
+*.backup
+*.tmp
+*.old
+*~
+
+# Model artifacts
+models/*.pkl
+models/*.joblib
+models/*.h5
+*.pkl
+*.joblib
+*.h5
+
+# Temporary data
+temp/
+tmp/
+cache/
+
+# Betfair/Trading specific
+*.session
+*session.json
+session/
+
+# Results/Output directories
+results/
+output/
+reports/
+plots/
+figures/
+predictions/
+forecasts/
+
+# Performance/profiling
+*.prof
+*.stats
+*.lprof
+
+# Documentation builds
+docs/_build/
+docs/_static/
+docs/_templates/
