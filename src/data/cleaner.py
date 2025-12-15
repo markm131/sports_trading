@@ -57,7 +57,7 @@ def clean_combined_file(league: str) -> pd.DataFrame:
     output_file = processed_dir / f"{league}_cleaned.csv"
     df_cleaned.to_csv(output_file, index=False)
 
-    print(f"  ✓ Saved: {output_file}")
+    print(f"  Saved: {output_file}")
 
     return df_cleaned
 
@@ -83,7 +83,7 @@ def main():
     for league in leagues:
         clean_combined_file(league)
 
-    print("\n✅ Cleaning complete!")
+    print("\nCleaning complete!")
 
 
 if __name__ == "__main__":

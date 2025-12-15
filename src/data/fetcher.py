@@ -68,7 +68,7 @@ def check_for_updates(league: str, season_year: int) -> bool:
 
         # Quick checks for differences
         if len(fresh_df) != len(existing_df):
-            print(f"  Row count changed: {len(existing_df)} → {len(fresh_df)}")
+            print(f"  Row count changed: {len(existing_df)} -> {len(fresh_df)}")
             return True
 
         # Check if any data changed (comparing raw data before we add season/league columns)
@@ -121,7 +121,7 @@ def download_season(
 
     # Use cached file if exists and not forcing
     if filepath.exists() and not force:
-        print(f"✓ Using cached {league_name} {season_readable}")
+        print(f"Using cached {league_name} {season_readable}")
         return pd.read_csv(filepath)
 
     # Download from web using the code format the API expects
@@ -134,10 +134,10 @@ def download_season(
         # Save/overwrite file
         df.to_csv(filepath, index=False)
 
-        print(f"✓ Downloaded {league_name} {season_readable}: {len(df)} matches")
+        print(f"Downloaded {league_name} {season_readable}: {len(df)} matches")
         return df
     except Exception as e:
-        print(f"✗ Failed {league_name} {season_readable}: {e}")
+        print(f"Failed {league_name} {season_readable}: {e}")
         return None
 
 
@@ -157,7 +157,7 @@ def download_multiple_seasons(
         return None
 
     combined = pd.concat(all_data, ignore_index=True)
-    print(f"\n✓ Total: {len(combined)} matches from {len(all_data)} seasons")
+    print(f"\nTotal: {len(combined)} matches from {len(all_data)} seasons")
 
     return combined
 
@@ -170,7 +170,7 @@ def save_combined_file(df: pd.DataFrame, league: str) -> None:
     league_dir = RAW_DATA_DIR / country / league
     combined_path = league_dir / f"{league}_combined.csv"
     df.to_csv(combined_path, index=False)
-    print(f"💾 Saved: {combined_path}")
+    print(f"Saved: {combined_path}")
 
 
 def weekly_update(
@@ -184,8 +184,8 @@ def weekly_update(
 
     # Only print header once for first league
     if league == list(LEAGUES.keys())[0]:
-        print(f"📅 Weekly Update - {now.strftime('%Y-%m-%d %H:%M')}")
-        print(f"🏈 Current season: {format_season_readable(current_year)}\n")
+        print(f"Weekly Update - {now.strftime('%Y-%m-%d %H:%M')}")
+        print(f"Current season: {format_season_readable(current_year)}\n")
 
     print(f"Checking {league_name}...")
 
@@ -198,16 +198,16 @@ def weekly_update(
     current_df = download_season(league, current_year, force=True)
 
     if current_df is None:
-        print("✗ Failed to update current season")
+        print("Failed to update current season")
         return None
 
     # Rebuild combined file (uses cached historical seasons)
-    print("\n🔄 Rebuilding combined file with all seasons...")
+    print("\nRebuilding combined file with all seasons...")
     combined = download_multiple_seasons(league, start_year, end_year, force=False)
 
     if combined is not None:
         save_combined_file(combined, league)
-        print(f"\n✓ Update complete! Current season has {len(current_df)} matches.")
+        print(f"\nUpdate complete! Current season has {len(current_df)} matches.")
 
     return combined
 
@@ -266,10 +266,10 @@ def main():
 
     # Exit with appropriate code for update mode
     if args.update and not any_updates:
-        print("\n✓ No updates found for any league")
+        print("\nNo updates found for any league")
         sys.exit(2)  # Special exit code for "no updates"
     elif args.update:
-        print("\n✓ Updates processed successfully")
+        print("\nUpdates processed successfully")
         sys.exit(0)
 
 

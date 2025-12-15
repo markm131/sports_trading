@@ -36,7 +36,7 @@ def prepare_match_data(row: pd.Series, league_info: dict) -> Dict[str, Any]:
                 dt = pd.to_datetime(match_date_raw, dayfirst=True)
                 match_date_iso = dt.strftime("%Y-%m-%d")
             except Exception:
-                print(f"  ⚠️  Could not parse date: {match_date_raw}")
+                print(f"  WARNING: Could not parse date: {match_date_raw}")
                 match_date_iso = match_date_raw
 
     # Build data dictionary
@@ -92,8 +92,8 @@ def get_latest_match_date(conn, league: str) -> str:
     cursor = conn.cursor()
 
     query = """
-        SELECT MAX(match_date) 
-        FROM matches 
+        SELECT MAX(match_date)
+        FROM matches
         WHERE league = ?
     """
 
@@ -123,7 +123,7 @@ def load_league_to_db(league: str, incremental: bool = False) -> Tuple[int, int,
 
     # Check if file exists
     if not csv_path.exists():
-        print(f"\n⚠️  Skipping {league} - file not found: {csv_path}")
+        print(f"\nWARNING: Skipping {league} - file not found: {csv_path}")
         return 0, 0, 0
 
     print(f"\nLoading {league_name}...")
@@ -149,7 +149,7 @@ def load_league_to_db(league: str, incremental: bool = False) -> Tuple[int, int,
         df_new = df[df["match_date_iso"] > latest_date].copy()
 
         if len(df_new) == 0:
-            print("  ✓ No new matches to process")
+            print("  No new matches to process")
             conn.close()
             return 0, 0, 0
 
@@ -218,17 +218,16 @@ def load_league_to_db(league: str, incremental: bool = False) -> Tuple[int, int,
                 inserted += 1
             except sqlite3.IntegrityError:
                 # Match already exists - check if data has actually changed
-                # Define update columns (exclude key fields)
                 update_cols = [
                     col
                     for col in columns
                     if col not in ["match_date", "home_team", "away_team"]
                 ]
 
-                # First, fetch the existing row to compare
+                # Fetch existing row to compare
                 check_query = f"""
                     SELECT {", ".join(update_cols)}
-                    FROM matches 
+                    FROM matches
                     WHERE match_date = ? AND home_team = ? AND away_team = ?
                 """
                 cursor.execute(
@@ -242,14 +241,11 @@ def load_league_to_db(league: str, incremental: bool = False) -> Tuple[int, int,
                 existing_row = cursor.fetchone()
 
                 if existing_row:
-                    # Compare new values with existing values
                     existing_values = list(existing_row)
                     new_values = [match_data.get(col) for col in update_cols]
 
-                    # Check if any value has changed (handle None/NULL comparisons)
                     has_changed = False
                     for old_val, new_val in zip(existing_values, new_values):
-                        # Handle None comparisons and convert to comparable types
                         old_comparable = None if old_val is None else old_val
                         new_comparable = (
                             None
@@ -257,22 +253,19 @@ def load_league_to_db(league: str, incremental: bool = False) -> Tuple[int, int,
                             or (isinstance(new_val, float) and pd.isna(new_val))
                             else new_val
                         )
-
                         if old_comparable != new_comparable:
                             has_changed = True
                             break
 
-                    # Only update if data has actually changed
                     if has_changed:
                         set_clause = ", ".join([f"{col} = ?" for col in update_cols])
 
                         update_query = f"""
-                            UPDATE matches 
+                            UPDATE matches
                             SET {set_clause}, updated_at = datetime('now')
                             WHERE match_date = ? AND home_team = ? AND away_team = ?
                         """
 
-                        # Build update values: update columns + where clause values
                         update_values = [match_data.get(col) for col in update_cols]
                         update_values += [
                             match_data["match_date"],
@@ -283,7 +276,7 @@ def load_league_to_db(league: str, incremental: bool = False) -> Tuple[int, int,
                         cursor.execute(update_query, update_values)
                         updated += 1
 
-            # Progress indicator every 100 matches (only if something was processed)
+            # Progress indicator every 100 matches
             total_processed = inserted + updated
             if total_processed > 0 and total_processed % 100 == 0:
                 print(f"    Processed {total_processed} matches...")
@@ -291,11 +284,9 @@ def load_league_to_db(league: str, incremental: bool = False) -> Tuple[int, int,
         except Exception as e:
             errors += 1
             print(
-                f"  ⚠️  Error processing match {row.get('match_date', 'unknown')} "
+                f"  WARNING: Error processing match {row.get('match_date', 'unknown')} "
                 f"{row.get('home_team', 'unknown')} vs {row.get('away_team', 'unknown')}: {str(e)[:100]}"
             )
-
-            # Continue processing other matches
             continue
 
     # Commit all changes
@@ -303,7 +294,7 @@ def load_league_to_db(league: str, incremental: bool = False) -> Tuple[int, int,
     conn.close()
 
     # Report results
-    print("\n  ✓ Complete:")
+    print("\n  Complete:")
     print(f"    - {inserted} new matches inserted")
     if updated > 0:
         print(f"    - {updated} matches updated")
@@ -318,41 +309,38 @@ def create_database_schema():
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # Drop existing table if doing a schema migration
-    # cursor.execute("DROP TABLE IF EXISTS matches")
-
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS matches (
             match_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            
+
             -- Location
             country TEXT NOT NULL,
             league TEXT NOT NULL,
             season TEXT NOT NULL,
-            
-            -- Match identification  
+
+            -- Match identification
             match_date TEXT NOT NULL,  -- YYYY-MM-DD format
             match_time TEXT,
             home_team TEXT NOT NULL,
             away_team TEXT NOT NULL,
             referee TEXT,
-            
+
             -- Full time results
             full_time_home_goals INTEGER,
             full_time_away_goals INTEGER,
             full_time_result TEXT CHECK (full_time_result IN ('H', 'D', 'A', NULL)),
-            
+
             -- Half time results
             half_time_home_goals INTEGER,
             half_time_away_goals INTEGER,
             half_time_result TEXT CHECK (half_time_result IN ('H', 'D', 'A', NULL)),
-            
+
             -- Match statistics - shots
             home_shots INTEGER,
             away_shots INTEGER,
             home_shots_on_target INTEGER,
             away_shots_on_target INTEGER,
-            
+
             -- Match statistics - fouls and cards
             home_fouls INTEGER,
             away_fouls INTEGER,
@@ -360,29 +348,29 @@ def create_database_schema():
             away_yellow_cards INTEGER,
             home_red_cards INTEGER,
             away_red_cards INTEGER,
-            
+
             -- Match statistics - corners
             home_corners INTEGER,
             away_corners INTEGER,
-            
+
             -- Pinnacle odds
             pinnacle_home_odds REAL CHECK (pinnacle_home_odds > 1.0 OR pinnacle_home_odds IS NULL),
             pinnacle_draw_odds REAL CHECK (pinnacle_draw_odds > 1.0 OR pinnacle_draw_odds IS NULL),
             pinnacle_away_odds REAL CHECK (pinnacle_away_odds > 1.0 OR pinnacle_away_odds IS NULL),
             pinnacle_over_2_5_odds REAL CHECK (pinnacle_over_2_5_odds > 1.0 OR pinnacle_over_2_5_odds IS NULL),
             pinnacle_under_2_5_odds REAL CHECK (pinnacle_under_2_5_odds > 1.0 OR pinnacle_under_2_5_odds IS NULL),
-            
+
             -- Calculated fields (SQLite 3.31.0+)
             total_goals INTEGER GENERATED ALWAYS AS (full_time_home_goals + full_time_away_goals) STORED,
             goal_difference INTEGER GENERATED ALWAYS AS (full_time_home_goals - full_time_away_goals) STORED,
-            
+
             -- Data quality tracking
             data_version INTEGER DEFAULT 1,
-            
+
             -- Metadata
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now')),
-            
+
             -- Prevent duplicates
             UNIQUE(match_date, home_team, away_team)
         )
@@ -402,7 +390,7 @@ def create_database_schema():
 
     conn.commit()
     conn.close()
-    print("✓ Database schema created successfully")
+    print("Database schema created successfully")
 
 
 def load_all_leagues() -> None:
@@ -418,7 +406,7 @@ def load_all_leagues() -> None:
         total_errors += errors
 
     print(
-        f"\n✅ Total: {total_inserted} inserted, {total_updated} updated, {total_errors} errors"
+        f"\nTotal: {total_inserted} inserted, {total_updated} updated, {total_errors} errors"
     )
 
 
@@ -430,7 +418,7 @@ def verify_load() -> None:
     # Total matches
     cursor.execute("SELECT COUNT(*) FROM matches")
     total = cursor.fetchone()[0]
-    print("\n📊 Database Statistics")
+    print("\nDatabase Statistics")
     print(f"   Total matches: {total}")
 
     # By league
@@ -439,24 +427,24 @@ def verify_load() -> None:
         "SELECT league, COUNT(*) FROM matches GROUP BY league ORDER BY league"
     )
     for league, count in cursor.fetchall():
-        print(f"     • {league}: {count}")
+        print(f"     - {league}: {count}")
 
     # By season
     print("\n   Recent Seasons:")
     cursor.execute("""
-        SELECT season, COUNT(*) 
-        FROM matches 
-        GROUP BY season 
-        ORDER BY season DESC 
+        SELECT season, COUNT(*)
+        FROM matches
+        GROUP BY season
+        ORDER BY season DESC
         LIMIT 5
     """)
     for season, count in cursor.fetchall():
-        print(f"     • {season}: {count}")
+        print(f"     - {season}: {count}")
 
     # Recent updates
     cursor.execute("""
-        SELECT COUNT(*) 
-        FROM matches 
+        SELECT COUNT(*)
+        FROM matches
         WHERE updated_at > created_at
     """)
     updated_count = cursor.fetchone()[0]
@@ -492,7 +480,7 @@ def main():
         verify_load()
     else:
         parser.print_help()
-        print("\n💡 Examples:")
+        print("\nExamples:")
         print("   python -m src.data.db_loader --init           # Initialize database")
         print("   python -m src.data.db_loader --all            # Load all leagues")
         print("   python -m src.data.db_loader --league premier_league")
