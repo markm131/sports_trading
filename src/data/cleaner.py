@@ -5,7 +5,6 @@ import pandas as pd
 
 from src.config import (
     COLUMN_MAPPING,
-    ESSENTIAL_COLUMNS,
     LEAGUES,
     PROCESSED_DATA_DIR,
     RAW_DATA_DIR,
@@ -13,13 +12,30 @@ from src.config import (
 
 
 def filter_and_rename_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Filter to essential columns and rename them to be descriptive"""
+    """Filter to essential columns and rename them to be descriptive.
 
-    # Select essential columns - will raise KeyError if missing
-    df_filtered = df[ESSENTIAL_COLUMNS].copy()
+    Only includes columns that exist in the dataframe.
+    Removes duplicate rows.
+    """
+    # Find which columns exist
+    available_columns = [col for col in COLUMN_MAPPING.keys() if col in df.columns]
+
+    # Select available columns
+    df_filtered = df[available_columns].copy()
 
     # Rename to descriptive names
-    df_renamed = df_filtered.rename(columns=COLUMN_MAPPING)
+    rename_map = {k: v for k, v in COLUMN_MAPPING.items() if k in available_columns}
+    df_renamed = df_filtered.rename(columns=rename_map)
+
+    # Remove duplicates based on match identifiers
+    before_count = len(df_renamed)
+    df_renamed = df_renamed.drop_duplicates(
+        subset=["match_date", "home_team", "away_team", "league"], keep="last"
+    )
+    after_count = len(df_renamed)
+
+    if before_count != after_count:
+        print(f"  Removed {before_count - after_count} duplicate rows")
 
     return df_renamed
 
@@ -41,7 +57,7 @@ def clean_combined_file(league: str) -> pd.DataFrame:
     print(f"\nProcessing {league}...")
     print(f"  Loading: {raw_file}")
 
-    df = pd.read_csv(raw_file)
+    df = pd.read_csv(raw_file, low_memory=False)
     print(f"  Raw data: {len(df)} matches, {len(df.columns)} columns")
 
     # Filter and rename columns
@@ -77,11 +93,16 @@ def main():
     args = parser.parse_args()
 
     # Determine which leagues to process
-    leagues = ["premier_league", "championship"] if args.all_leagues else [args.league]
+    leagues = list(LEAGUES.keys()) if args.all_leagues else [args.league]
 
     # Process each league
     for league in leagues:
-        clean_combined_file(league)
+        try:
+            clean_combined_file(league)
+        except FileNotFoundError as e:
+            print(f"\nSkipping {league}: {e}")
+        except Exception as e:
+            print(f"\nError processing {league}: {e}")
 
     print("\nCleaning complete!")
 

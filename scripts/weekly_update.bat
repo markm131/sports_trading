@@ -29,12 +29,12 @@ if %LOADER_RESULT% neq 0 goto :error
 python -m src.data.cleaner --all-leagues >> "%LOGFILE%" 2>&1
 if %errorlevel% neq 0 goto :error
 
-python -m src.data.db_loader --all >> "%LOGFILE%" 2>&1
+python -m src.data.db_writer --all >> "%LOGFILE%" 2>&1
 if %errorlevel% neq 0 goto :error
 
 :success
-echo ✅ Update complete! >> "%LOGFILE%"
-echo ✅ Update complete!
+echo [OK] Update complete! >> "%LOGFILE%"
+echo [OK] Update complete!
 echo See full log: %LOGFILE%
 goto :end
 
@@ -44,8 +44,8 @@ echo No new matches found - no updates needed
 goto :end
 
 :error
-echo ERROR occurred! Check log file >> "%LOGFILE%"
-echo ❌ ERROR occurred! Check log: %LOGFILE%
+echo [ERROR] Check log file >> "%LOGFILE%"
+echo [ERROR] Check log: %LOGFILE%
 color 0C
 
 :end

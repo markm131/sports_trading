@@ -1,4 +1,4 @@
-# src/data/loader.py
+# src/data/fetcher.py
 """Download historical match data from football-data.co.uk"""
 
 import sys
@@ -34,69 +34,6 @@ def format_season_readable(start_year: int) -> str:
     return f"{start_year}-{str(start_year + 1)[-2:]}"
 
 
-def check_for_updates(league: str, season_year: int) -> bool:
-    """Check if there are any updates available for a season
-
-    Returns:
-        True if updates available, False otherwise
-    """
-    league_info = LEAGUES[league]
-    league_code = league_info["code"]
-    league_name = league_info["name"]
-    country = league_info["country"]
-
-    # Get paths
-    league_dir = RAW_DATA_DIR / country / league
-    season_readable = format_season_readable(season_year)
-    existing_file = league_dir / f"{league}_{season_readable}.csv"
-
-    # If file doesn't exist, we definitely need to download
-    if not existing_file.exists():
-        print(f"  No cached file for {league_name} {season_readable}")
-        return True
-
-    # Download to memory to compare
-    season_code = generate_season_code(season_year)
-    url = FOOTBALL_DATA_BASE_URL.format(season_code, league_code)
-
-    try:
-        # Download fresh data
-        fresh_df = pd.read_csv(url, encoding="latin-1")
-
-        # Load existing data
-        existing_df = pd.read_csv(existing_file)
-
-        # Quick checks for differences
-        if len(fresh_df) != len(existing_df):
-            print(f"  Row count changed: {len(existing_df)} -> {len(fresh_df)}")
-            return True
-
-        # Check if any data changed (comparing raw data before we add season/league columns)
-        # Remove the columns we added when saving
-        existing_data = existing_df.drop(["season", "league"], axis=1, errors="ignore")
-
-        # Sort both dataframes by date and teams to ensure consistent comparison
-        fresh_sorted = fresh_df.sort_values(
-            ["Date", "HomeTeam", "AwayTeam"]
-        ).reset_index(drop=True)
-        existing_sorted = existing_data.sort_values(
-            ["Date", "HomeTeam", "AwayTeam"]
-        ).reset_index(drop=True)
-
-        # Compare DataFrames
-        if not fresh_sorted.equals(existing_sorted):
-            print(f"  Data changes detected in {league_name} {season_readable}")
-            return True
-
-        print(f"  No changes in {league_name} {season_readable}")
-        return False
-
-    except Exception as e:
-        print(f"  Error checking {league_name} {season_readable}: {e}")
-        # On error, assume updates needed
-        return True
-
-
 def download_season(
     league: str,
     season_year: int,
@@ -108,15 +45,12 @@ def download_season(
     league_name = league_info["name"]
     country = league_info["country"]
 
-    # Create country/league directory structure
     league_dir = RAW_DATA_DIR / country / league
     league_dir.mkdir(parents=True, exist_ok=True)
 
-    # Generate both formats
     season_code = generate_season_code(season_year)
     season_readable = format_season_readable(season_year)
 
-    # Use clear filename with league prefix and readable season
     filepath = league_dir / f"{league}_{season_readable}.csv"
 
     # Use cached file if exists and not forcing
@@ -124,14 +58,14 @@ def download_season(
         print(f"Using cached {league_name} {season_readable}")
         return pd.read_csv(filepath)
 
-    # Download from web using the code format the API expects
+    # Download from web
     url = FOOTBALL_DATA_BASE_URL.format(season_code, league_code)
     try:
         df = pd.read_csv(url, encoding="latin-1")
         df["season"] = season_readable
         df["league"] = league_name
 
-        # Save/overwrite file
+        # Save individual season file (overwrite)
         df.to_csv(filepath, index=False)
 
         print(f"Downloaded {league_name} {season_readable}: {len(df)} matches")
@@ -157,18 +91,30 @@ def download_multiple_seasons(
         return None
 
     combined = pd.concat(all_data, ignore_index=True)
+
+    # Deduplicate - keep last occurrence
+    before = len(combined)
+    combined = combined.drop_duplicates(
+        subset=["Date", "HomeTeam", "AwayTeam", "season"], keep="last"
+    )
+    after = len(combined)
+    if before != after:
+        print(f"  Removed {before - after} duplicates")
+
     print(f"\nTotal: {len(combined)} matches from {len(all_data)} seasons")
 
     return combined
 
 
 def save_combined_file(df: pd.DataFrame, league: str) -> None:
-    """Save combined CSV file in country/league subdirectory"""
+    """Save combined CSV file - always overwrites"""
     league_info = LEAGUES[league]
     country = league_info["country"]
 
     league_dir = RAW_DATA_DIR / country / league
     combined_path = league_dir / f"{league}_combined.csv"
+
+    # Always overwrite, never append
     df.to_csv(combined_path, index=False)
     print(f"Saved: {combined_path}")
 
@@ -176,38 +122,28 @@ def save_combined_file(df: pd.DataFrame, league: str) -> None:
 def weekly_update(
     league: str, start_year: int, end_year: int
 ) -> Optional[pd.DataFrame]:
-    """Smart weekly update: check for changes before downloading"""
+    """Smart weekly update: force current season, use cached historical"""
     now = datetime.now()
     current_year = now.year if now.month >= SEASON_START_MONTH else now.year - 1
 
     league_name = LEAGUES[league]["name"]
 
-    # Only print header once for first league
-    if league == list(LEAGUES.keys())[0]:
-        print(f"Weekly Update - {now.strftime('%Y-%m-%d %H:%M')}")
-        print(f"Current season: {format_season_readable(current_year)}\n")
+    print(f"\nUpdating {league_name}...")
+    print(f"  Current season: {format_season_readable(current_year)}")
 
-    print(f"Checking {league_name}...")
-
-    # Check if current season has updates
-    if not check_for_updates(league, current_year):
-        return None  # No updates needed
-
-    # If we get here, there are updates - download them
-    print("  Downloading updates...")
+    # Force re-download current season only
     current_df = download_season(league, current_year, force=True)
 
     if current_df is None:
-        print("Failed to update current season")
+        print("  Failed to update current season")
         return None
 
-    # Rebuild combined file (uses cached historical seasons)
-    print("\nRebuilding combined file with all seasons...")
+    # Rebuild combined file (uses cached historical + fresh current)
     combined = download_multiple_seasons(league, start_year, end_year, force=False)
 
     if combined is not None:
         save_combined_file(combined, league)
-        print(f"\nUpdate complete! Current season has {len(current_df)} matches.")
+        print(f"  Update complete! {len(current_df)} matches in current season.")
 
     return combined
 
@@ -220,7 +156,7 @@ def main():
         "--league",
         default="premier_league",
         choices=list(LEAGUES.keys()),
-        help="League name (premier_league, championship, etc.)",
+        help="League name",
     )
     parser.add_argument(
         "--all-leagues", action="store_true", help="Download all leagues"
@@ -239,18 +175,15 @@ def main():
 
     args = parser.parse_args()
 
-    # Determine which leagues to process
     leagues_to_process = list(LEAGUES.keys()) if args.all_leagues else [args.league]
 
-    # Track if any updates were found
     any_updates = False
 
-    # Process each league
     for league in leagues_to_process:
         if len(leagues_to_process) > 1 and not args.update:
             print(f"\n{'=' * 60}")
             print(f"Processing: {LEAGUES[league]['name']}")
-            print(f"{'=' * 60}\n")
+            print(f"{'=' * 60}")
 
         if args.update:
             result = weekly_update(league, args.start_year, args.end_year)
@@ -264,10 +197,9 @@ def main():
                 save_combined_file(df, league)
                 any_updates = True
 
-    # Exit with appropriate code for update mode
     if args.update and not any_updates:
         print("\nNo updates found for any league")
-        sys.exit(2)  # Special exit code for "no updates"
+        sys.exit(2)
     elif args.update:
         print("\nUpdates processed successfully")
         sys.exit(0)
