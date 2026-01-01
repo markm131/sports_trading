@@ -32,7 +32,8 @@ class DiscordDashboard:
             req = Request(
                 self.webhook_url,
                 data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
+                headers={"Content-Type": "application/json",
+                         "User-Agent": "SportsBot/1.0"},
             )
             urlopen(req)
             return True
