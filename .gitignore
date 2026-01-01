@@ -79,6 +79,9 @@ books/
 logs/
 *.log
 
+# Paper trading state (runtime data, not source code)
+paper_trading/
+
 # Jupyter Notebooks
 .ipynb_checkpoints/
 *.ipynb_checkpoints
