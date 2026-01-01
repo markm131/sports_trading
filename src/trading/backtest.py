@@ -58,7 +58,7 @@ def backtest_strategy(
     # Get matches in backtest period WITH Pinnacle odds
     league_filter = ""
     if leagues:
-        league_list = ", ".join(f"'{l}'" for l in leagues)
+        league_list = ", ".join(f"'{lg}'" for lg in leagues)
         league_filter = f"AND league IN ({league_list})"
 
     matches = pd.read_sql(
