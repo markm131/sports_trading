@@ -347,6 +347,26 @@ def create_betting_tables():
         )
     """)
 
+    # Odds history tracking
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS odds_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scanned_at TEXT NOT NULL DEFAULT (datetime('now')),
+            market_id TEXT,
+            kickoff TEXT,
+            mins_to_kickoff INTEGER,
+            league TEXT,
+            home_team TEXT,
+            away_team TEXT,
+            home_odds REAL,
+            draw_odds REAL,
+            away_odds REAL,
+            home_edge REAL,
+            draw_edge REAL,
+            away_edge REAL
+        )
+    """)
+
     # Create indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_bets_status ON bets(status)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_bets_date ON bets(match_date)")

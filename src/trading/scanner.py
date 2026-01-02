@@ -828,6 +828,41 @@ class Scanner:
         )
         return round(stake, 2) if stake >= MIN_STAKE else 0.0
 
+    def log_odds_history(self, match: Dict, league: str, pred: Dict, fair: Dict):
+        """Log odds snapshot for later analysis."""
+        from datetime import datetime
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        kickoff = match["start_time"]
+        mins_to_kickoff = (kickoff - datetime.utcnow()).total_seconds() / 60
+
+        cursor.execute(
+            """
+            INSERT INTO odds_history 
+            (market_id, kickoff, mins_to_kickoff, league, home_team, away_team,
+             home_odds, draw_odds, away_odds, home_edge, draw_edge, away_edge)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+            (
+                match["market_id"],
+                kickoff.isoformat(),
+                int(mins_to_kickoff),
+                league,
+                match["home_team"],
+                match["away_team"],
+                match["home_odds"],
+                match["draw_odds"],
+                match["away_odds"],
+                pred["home_win"] - fair["home"],
+                pred["draw"] - fair["draw"],
+                pred["away_win"] - fair["away"],
+            ),
+        )
+        conn.commit()
+        conn.close()
+
     def find_value_bets(self, matches: List[Dict], league: str) -> List[Dict]:
         """
         Find value bets and decide which to place based on timing.
@@ -866,6 +901,12 @@ class Scanner:
 
             # Remove vig for fair comparison
             fair = remove_vig(odds)
+
+            # Log odds for analysis
+            try:
+                self.log_odds_history(match, league, pred, fair)
+            except Exception:
+                pass  # Don't break scanning if logging fails
 
             # Check each selection
             for sel, model_key in [
