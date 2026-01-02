@@ -14,7 +14,9 @@ def get_db_connection():
     """Get SQLite database connection"""
     db_path = PROJECT_ROOT / "db" / "betfair.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    return sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=30)
+    conn.execute("PRAGMA busy_timeout = 30000")
+    return conn
 
 
 def prepare_match_data(row: pd.Series, league_info: dict) -> Dict[str, Any]:
