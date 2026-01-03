@@ -154,8 +154,10 @@ def settle_handler(event, context):
         "statusCode": 200,
         "body": json.dumps(
             {
-                "bankroll": status["bankroll"],
-                "profit": status["profit"],
+                "available": status["available"],
+                "in_play": status["in_play"],
+                "total_bankroll": status["total_bankroll"],
+                "realised_pnl": status["realised_pnl"],
                 "roi_pct": status["roi_pct"],
             }
         ),

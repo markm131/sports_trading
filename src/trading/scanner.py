@@ -444,14 +444,28 @@ class DatabaseBankroll:
         conn.close()
 
     def status(self) -> Dict:
-        """Return current status."""
+        """Return current status with proper separation of available cash and realised P&L."""
         current = self.bankroll
         initial = self.initial
+
+        # Get pending stakes (money in play, not yet settled)
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT COALESCE(SUM(stake), 0) FROM bets WHERE status = 'pending'"
+        )
+        pending_stakes = cursor.fetchone()[0]
+        conn.close()
+
+        total_bankroll = current + pending_stakes
+        realised_pnl = total_bankroll - initial
+
         return {
-            "bankroll": current,
-            "initial": initial,
-            "profit": current - initial,
-            "roi_pct": ((current - initial) / initial * 100) if initial > 0 else 0,
+            "available": current,
+            "in_play": pending_stakes,
+            "total_bankroll": total_bankroll,
+            "realised_pnl": realised_pnl,
+            "roi_pct": (realised_pnl / initial * 100) if initial > 0 else 0,
             "started": self.started,
         }
 
@@ -1154,9 +1168,10 @@ class Scanner:
         print("PAPER TRADING STATUS")
         print("=" * 70)
         print(f"Started: {status['started'][:10]}")
-        print(f"Initial bankroll: £{status['initial']:.2f}")
-        print(f"Current bankroll: £{status['bankroll']:.2f}")
-        print(f"Profit/Loss: £{status['profit']:+.2f}")
+        print(f"Available cash: £{status['available']:.2f}")
+        print(f"In play: £{status['in_play']:.2f}")
+        print(f"Total bankroll: £{status['total_bankroll']:.2f}")
+        print(f"Realised P&L: £{status['realised_pnl']:+.2f}")
         print(f"ROI: {status['roi_pct']:+.1f}%")
 
         # Pending opportunities

@@ -32,8 +32,10 @@ class DiscordDashboard:
             req = Request(
                 self.webhook_url,
                 data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json",
-                         "User-Agent": "SportsBot/1.0"},
+                headers={
+                    "Content-Type": "application/json",
+                    "User-Agent": "SportsBot/1.0",
+                },
             )
             urlopen(req)
             return True
@@ -247,8 +249,7 @@ def send_dashboard_update():
 
     stats = get_bets_summary()
     stats["bankroll"] = get_current_bankroll()
-    stats["total_profit"] = stats["bankroll"] - 1000
-    stats["roi"] = (stats["total_profit"] / 1000) * 100
+    # total_profit and roi already calculated from settled bets in get_bets_summary()
 
     recent = get_recent_bets(10).to_dict("records")
     pending_df = get_recent_bets(20)
