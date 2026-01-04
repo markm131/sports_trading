@@ -27,7 +27,6 @@ from typing import Dict, List, Optional
 import pandas as pd
 from dotenv import load_dotenv
 
-from src.config import PROJECT_ROOT
 from src.data.db_writer import (
     create_betting_tables,
     export_bets_to_csv,
@@ -50,284 +49,22 @@ except ImportError:
     BETFAIR_AVAILABLE = False
 
 
-# =============================================================================
-# Configuration
-# =============================================================================
-
-INITIAL_BANKROLL = 1000.0
-KELLY_FRACTION = 0.10  # 10% Kelly - conservative
-MIN_STAKE = 2.0
-MAX_STAKE_PCT = 0.02  # 2% max per bet
-
-# Edge thresholds
-DEFAULT_MIN_EDGE = 0.03
-DEFAULT_MAX_EDGE = 0.12
-
-# Bet timing configuration
-BET_TIMING = {
-    # When to place bets (minutes before kickoff)
-    # We track opportunities but only "place" when within this window
-    "place_bet_mins_before": 60,  # Place bet 60 mins before kickoff
-    "min_mins_before": 5,  # Don't bet if less than 5 mins to kickoff
-    # How long value must persist before betting (reduces noise)
-    "min_consecutive_scans": 1,  # Bet immediately if value found (set to 2+ to wait)
-}
-
-# Scanning configuration
-SCAN_CONFIG = {
-    "interval_minutes": 15,  # How often to scan in daemon mode
-    "days_ahead": 2,  # How far ahead to look for fixtures
-    "quiet_hours_start": 1,  # Don't scan between 1am and 6am (UTC)
-    "quiet_hours_end": 6,
-}
+from src.config import (
+    BET_TIMING,
+    BETFAIR_COMPETITIONS,
+    BETFAIR_TEAM_MAP,
+    DEFAULT_MAX_EDGE,
+    DEFAULT_MIN_EDGE,
+    INITIAL_BANKROLL,
+    KELLY_FRACTION,
+    MAX_STAKE_PCT,
+    MIN_STAKE,
+    PROJECT_ROOT,
+    SCAN_CONFIG,
+)
 
 # Logging
 LOG_FILE = PROJECT_ROOT / "logs" / "scanner.log"
-
-# Betfair competition IDs for all leagues
-BETFAIR_COMPETITIONS = {
-    # England
-    "Premier League": 10932509,
-    "Championship": 7129730,
-    # Germany
-    "Bundesliga": 59,
-    "Bundesliga 2": 59197,
-    # Spain
-    "La Liga": 117,
-    "La Liga 2": 12204313,
-    # Italy
-    "Serie A": 81,
-    "Serie B": 12199689,
-    # France
-    "Ligue 1": 55,
-    "Ligue 2": 60,
-    # Netherlands
-    "Eredivisie": 9404054,
-    # Belgium
-    "Jupiler League": 89979,
-    # Portugal
-    "Primeira Liga": 99,
-    # Scotland
-    "Scottish Premiership": 105,
-}
-
-# Team name mappings (Betfair -> Our DB format)
-BETFAIR_TEAM_MAP = {
-    # England - Premier League
-    "Man Utd": "Man United",
-    "Manchester United": "Man United",
-    "Man City": "Man City",
-    "Manchester City": "Man City",
-    "Newcastle": "Newcastle",
-    "Newcastle United": "Newcastle",
-    "Spurs": "Tottenham",
-    "Tottenham Hotspur": "Tottenham",
-    "Nottm Forest": "Nott'm Forest",
-    "Nottingham Forest": "Nott'm Forest",
-    "Wolves": "Wolves",
-    "Wolverhampton": "Wolves",
-    "Wolverhampton Wanderers": "Wolves",
-    "Sheffield Utd": "Sheffield United",
-    "Brighton and Hove Albion": "Brighton",
-    "Brighton & Hove Albion": "Brighton",
-    "West Ham United": "West Ham",
-    "AFC Bournemouth": "Bournemouth",
-    "Ipswich Town": "Ipswich",
-    "Leicester City": "Leicester",
-    "Luton Town": "Luton",
-    # England - Championship
-    "Leeds United": "Leeds",
-    "Sheffield Wed": "Sheffield Weds",
-    "Sheffield Wednesday": "Sheffield Weds",
-    "West Brom": "West Brom",
-    "West Bromwich Albion": "West Brom",
-    "Queens Park Rangers": "QPR",
-    "Stoke City": "Stoke",
-    "Norwich City": "Norwich",
-    "Hull City": "Hull",
-    "Bristol City": "Bristol City",
-    "Cardiff City": "Cardiff",
-    "Swansea City": "Swansea",
-    "Preston North End": "Preston",
-    "Coventry City": "Coventry",
-    "Plymouth Argyle": "Plymouth",
-    # Germany - Bundesliga
-    "Bayern Munich": "Bayern Munich",
-    "Bayer Leverkusen": "Leverkusen",
-    "Borussia Dortmund": "Dortmund",
-    "RB Leipzig": "RB Leipzig",
-    "Eintracht Frankfurt": "Ein Frankfurt",
-    "VfB Stuttgart": "Stuttgart",
-    "Borussia M'gladbach": "M'gladbach",
-    "Borussia Monchengladbach": "M'gladbach",
-    "Werder Bremen": "Werder Bremen",
-    "SC Freiburg": "Freiburg",
-    "VfL Wolfsburg": "Wolfsburg",
-    "TSG Hoffenheim": "Hoffenheim",
-    "1. FC Union Berlin": "Union Berlin",
-    "FC Augsburg": "Augsburg",
-    "1. FC Heidenheim": "Heidenheim",
-    "FSV Mainz 05": "Mainz",
-    "Mainz 05": "Mainz",
-    "VfL Bochum": "Bochum",
-    "FC St Pauli": "St Pauli",
-    "Holstein Kiel": "Holstein Kiel",
-    # Germany - Bundesliga 2
-    "Hamburger SV": "Hamburg",
-    "Fortuna Dusseldorf": "Fortuna Dusseldorf",
-    "FC Koln": "FC Koln",
-    "1. FC Koln": "FC Koln",
-    "Greuther Furth": "Greuther Furth",
-    "FC Nurnberg": "Nurnberg",
-    "1. FC Nurnberg": "Nurnberg",
-    "Hertha BSC": "Hertha Berlin",
-    "Schalke 04": "Schalke 04",
-    "Hannover 96": "Hannover",
-    "1. FC Kaiserslautern": "Kaiserslautern",
-    "SC Paderborn": "Paderborn",
-    "Karlsruher SC": "Karlsruhe",
-    "1. FC Magdeburg": "Magdeburg",
-    "Eintracht Braunschweig": "Braunschweig",
-    "SV Darmstadt 98": "Darmstadt",
-    "SSV Ulm 1846": "Ulm",
-    "Preussen Munster": "Munster",
-    "SV Elversberg": "Elversberg",
-    "Jahn Regensburg": "Regensburg",
-    # Spain - La Liga
-    "Real Madrid": "Real Madrid",
-    "FC Barcelona": "Barcelona",
-    "Atletico Madrid": "Ath Madrid",
-    "Athletic Bilbao": "Ath Bilbao",
-    "Real Sociedad": "Sociedad",
-    "Real Betis": "Betis",
-    "Villarreal": "Villarreal",
-    "Sevilla FC": "Sevilla",
-    "Valencia CF": "Valencia",
-    "Celta Vigo": "Celta",
-    "RCD Mallorca": "Mallorca",
-    "Girona FC": "Girona",
-    "Rayo Vallecano": "Vallecano",
-    "Osasuna": "Osasuna",
-    "Getafe CF": "Getafe",
-    "UD Las Palmas": "Las Palmas",
-    "Deportivo Alaves": "Alaves",
-    "RCD Espanyol": "Espanol",
-    "Real Valladolid": "Valladolid",
-    "CD Leganes": "Leganes",
-    # Italy - Serie A
-    "Inter Milan": "Inter",
-    "AC Milan": "Milan",
-    "Juventus": "Juventus",
-    "SSC Napoli": "Napoli",
-    "AS Roma": "Roma",
-    "SS Lazio": "Lazio",
-    "Atalanta": "Atalanta",
-    "ACF Fiorentina": "Fiorentina",
-    "Bologna FC": "Bologna",
-    "Torino FC": "Torino",
-    "Udinese": "Udinese",
-    "Genoa CFC": "Genoa",
-    "Cagliari": "Cagliari",
-    "Hellas Verona": "Verona",
-    "Empoli FC": "Empoli",
-    "Parma Calcio": "Parma",
-    "Como 1907": "Como",
-    "Venezia FC": "Venezia",
-    "US Lecce": "Lecce",
-    "Monza": "Monza",
-    # France - Ligue 1
-    "Paris Saint-Germain": "Paris SG",
-    "Paris St Germain": "Paris SG",
-    "AS Monaco": "Monaco",
-    "Olympique Marseille": "Marseille",
-    "Olympique Lyon": "Lyon",
-    "Lille OSC": "Lille",
-    "OGC Nice": "Nice",
-    "RC Lens": "Lens",
-    "Stade Rennais": "Rennes",
-    "Stade Brestois": "Brest",
-    "RC Strasbourg": "Strasbourg",
-    "Toulouse FC": "Toulouse",
-    "Montpellier HSC": "Montpellier",
-    "FC Nantes": "Nantes",
-    "Stade Reims": "Reims",
-    "AJ Auxerre": "Auxerre",
-    "Angers SCO": "Angers",
-    "Le Havre AC": "Le Havre",
-    "AS Saint-Etienne": "St Etienne",
-    # Netherlands - Eredivisie
-    "Ajax": "Ajax",
-    "PSV Eindhoven": "PSV",
-    "Feyenoord": "Feyenoord",
-    "AZ Alkmaar": "AZ",
-    "FC Twente": "Twente",
-    "FC Utrecht": "Utrecht",
-    "Sparta Rotterdam": "Sparta Rotterdam",
-    "Go Ahead Eagles": "Go Ahead Eagles",
-    "SC Heerenveen": "Heerenveen",
-    "NEC Nijmegen": "NEC Nijmegen",
-    "Fortuna Sittard": "For Sittard",
-    "PEC Zwolle": "Zwolle",
-    "Willem II": "Willem II",
-    "Heracles Almelo": "Heracles",
-    "RKC Waalwijk": "Waalwijk",
-    "FC Groningen": "Groningen",
-    "NAC Breda": "NAC Breda",
-    "Almere City FC": "Almere City",
-    # Belgium - Jupiler League
-    "Club Brugge": "Club Brugge",
-    "RSC Anderlecht": "Anderlecht",
-    "KRC Genk": "Genk",
-    "Royal Antwerp": "Antwerp",
-    "Union Saint-Gilloise": "St. Gilloise",
-    "KAA Gent": "Gent",
-    "Cercle Brugge": "Cercle Brugge",
-    "Standard Liege": "Standard",
-    "OH Leuven": "Oud-Heverlee Leuven",
-    "KV Mechelen": "Mechelen",
-    "Charleroi": "Charleroi",
-    "Westerlo": "Westerlo",
-    "STVV": "St Truiden",
-    "Sint-Truidense VV": "St Truiden",
-    "KV Kortrijk": "Kortrijk",
-    "FCV Dender EH": "Dender",
-    "Beerschot VA": "Beerschot",
-    # Portugal - Primeira Liga
-    "SL Benfica": "Benfica",
-    "FC Porto": "Porto",
-    "Sporting CP": "Sporting CP",
-    "Sporting Lisbon": "Sporting CP",
-    "SC Braga": "Sp Braga",
-    "Vitoria SC": "Guimaraes",
-    "Vitoria Guimaraes": "Guimaraes",
-    "Rio Ave FC": "Rio Ave",
-    "Famalicao": "Famalicao",
-    "Santa Clara": "Santa Clara",
-    "Moreirense FC": "Moreirense",
-    "Casa Pia AC": "Casa Pia",
-    "Gil Vicente": "Gil Vicente",
-    "Boavista FC": "Boavista",
-    "Arouca": "Arouca",
-    "Estoril Praia": "Estoril",
-    "Estrela Amadora": "Estrela",
-    "AVS": "AVS",
-    "Farense": "Farense",
-    "Nacional": "Nacional",
-    # Scotland - Premiership
-    "Celtic": "Celtic",
-    "Rangers": "Rangers",
-    "Aberdeen": "Aberdeen",
-    "Hearts": "Hearts",
-    "Heart of Midlothian": "Hearts",
-    "Hibernian": "Hibernian",
-    "Dundee": "Dundee",
-    "Dundee United": "Dundee Utd",
-    "Motherwell": "Motherwell",
-    "Kilmarnock": "Kilmarnock",
-    "St Mirren": "St Mirren",
-    "St Johnstone": "St Johnstone",
-    "Ross County": "Ross County",
-}
 
 
 def normalize_team(name: str) -> str:
@@ -406,9 +143,11 @@ class DatabaseBankroll:
         conn.close()
         return result[0] if result else datetime.now().isoformat()
 
-    def place_bet(self, stake: float, bet_id: int = None):
+    def place_bet(self, stake: float, bet_id: int = None, conn=None):
         """Deduct stake from bankroll."""
-        conn = get_db_connection()
+        close_conn = conn is None
+        if conn is None:
+            conn = get_db_connection()
         cursor = conn.cursor()
         new_balance = self.bankroll - stake
         cursor.execute(
@@ -419,11 +158,16 @@ class DatabaseBankroll:
             (-stake, new_balance, bet_id),
         )
         conn.commit()
-        conn.close()
+        if close_conn:
+            conn.close()
 
-    def settle_bet(self, stake: float, odds: float, won: bool, bet_id: int = None):
+    def settle_bet(
+        self, stake: float, odds: float, won: bool, bet_id: int = None, conn=None
+    ):
         """Settle a bet - add returns if won."""
-        conn = get_db_connection()
+        close_conn = conn is None
+        if conn is None:
+            conn = get_db_connection()
         cursor = conn.cursor()
         if won:
             winnings = stake * odds
@@ -442,7 +186,8 @@ class DatabaseBankroll:
             (winnings, new_balance, bet_id, notes),
         )
         conn.commit()
-        conn.close()
+        if close_conn:
+            conn.close()
 
     def status(self) -> Dict:
         """Return current status with proper separation of available cash and realised P&L."""
@@ -1141,9 +886,9 @@ class Scanner:
                 ),
             )
 
-            # Update bankroll
+            # Update bankroll (pass connection to avoid locking)
             self.bankroll.settle_bet(
-                bet["stake"], bet["odds"], won, bet_id=bet["bet_id"]
+                bet["stake"], bet["odds"], won, bet_id=bet["bet_id"], conn=conn
             )
 
             status_str = "✓ WIN" if won else "✗ LOSS"
@@ -1264,7 +1009,11 @@ class Scanner:
                         )
 
                         self.bankroll.settle_bet(
-                            bet["stake"], bet["odds"], won, bet_id=bet["bet_id"]
+                            bet["stake"],
+                            bet["odds"],
+                            won,
+                            bet_id=bet["bet_id"],
+                            conn=conn,
                         )
 
                         status_str = "✓ WIN" if won else "✗ LOSS"
