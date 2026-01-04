@@ -10,7 +10,8 @@ Usage:
     python -m src.trading.scanner                    # Single scan
     python -m src.trading.scanner --daemon           # Run continuously
     python -m src.trading.scanner --daemon --interval 15  # Every 15 mins
-    python -m src.trading.scanner --results          # Settle yesterday's bets
+    python -m src.trading.scanner --results          # Settle yesterday's bets (via football-data)
+    python -m src.trading.scanner --settle-betfair   # Settle via Betfair (faster!)
     python -m src.trading.scanner --status           # Show bankroll status
     python -m src.trading.scanner --reset            # Reset paper trading
 """
@@ -922,7 +923,10 @@ class Scanner:
             except Exception:
                 pass  # Don't break scanning if logging fails
 
-            # Check each selection
+            # Find the BEST value selection for this match (only bet on one)
+            best_bet = None
+            best_edge = 0
+
             for sel, model_key in [
                 ("home", "home_win"),
                 ("draw", "draw"),
@@ -934,8 +938,9 @@ class Scanner:
 
                 if DEFAULT_MIN_EDGE <= edge <= DEFAULT_MAX_EDGE:
                     stake = self.calculate_stake(model_prob, odds[sel])
-                    if stake > 0:
-                        bet_data = {
+                    if stake > 0 and edge > best_edge:
+                        best_edge = edge
+                        best_bet = {
                             "scan_time": datetime.now().isoformat(),
                             "league": league,
                             "match_time": match["start_time"].isoformat(),
@@ -955,18 +960,19 @@ class Scanner:
                             "profit": None,
                         }
 
-                        # Check if we should place this bet now
-                        result = self.tracker.update_opportunity(
-                            market_id=match["market_id"],
-                            selection=sel,
-                            edge=edge,
-                            odds=odds[sel],
-                            kickoff=match["start_time"],
-                            bet_data=bet_data,
-                        )
+            # Only process the single best selection per match
+            if best_bet:
+                result = self.tracker.update_opportunity(
+                    market_id=match["market_id"],
+                    selection=best_bet["selection"],
+                    edge=best_bet["edge"],
+                    odds=best_bet["odds"],
+                    kickoff=match["start_time"],
+                    bet_data=best_bet,
+                )
 
-                        if result:
-                            bets_to_place.append(result)
+                if result:
+                    bets_to_place.append(result)
 
         return bets_to_place
 
@@ -1119,6 +1125,162 @@ class Scanner:
 
         # Show summary with CLV stats
         self._print_summary()
+
+    def settle_bets_betfair(self):
+        """
+        Settle pending bets by checking Betfair market status.
+
+        Much faster than waiting for football-data.co.uk - markets settle
+        within minutes of the match ending.
+        """
+        conn = get_db_connection()
+
+        # Get pending bets that have a market_id
+        pending_df = pd.read_sql(
+            """
+            SELECT bet_id, league, match_date, home_team, away_team, 
+                   market_id, selection, odds, stake
+            FROM bets
+            WHERE status = 'pending' AND market_id IS NOT NULL
+            """,
+            conn,
+        )
+
+        if len(pending_df) == 0:
+            print("No pending bets with Betfair market IDs")
+            conn.close()
+            return
+
+        print(f"\nChecking {len(pending_df)} pending bets on Betfair...")
+        print("=" * 70)
+
+        # Group by market_id to minimize API calls
+        market_ids = pending_df["market_id"].unique().tolist()
+
+        try:
+            betfair = BetfairClient()
+            betfair.login()
+
+            # Get market results for all pending markets
+            settled_count = 0
+
+            for market_id in market_ids:
+                try:
+                    # Get market book to check status
+                    books = betfair.client.betting.list_market_book(
+                        market_ids=[market_id],
+                        price_projection=filters.price_projection(
+                            price_data=["EX_BEST_OFFERS"]
+                        ),
+                    )
+
+                    if not books:
+                        continue
+
+                    book = books[0]
+
+                    # Check if market is settled (CLOSED status)
+                    if book.status != "CLOSED":
+                        # Market not yet settled
+                        continue
+
+                    # Find the winning runner (status = "WINNER")
+                    winner_selection_id = None
+                    for runner in book.runners:
+                        if runner.status == "WINNER":
+                            winner_selection_id = runner.selection_id
+                            break
+
+                    if winner_selection_id is None:
+                        # No winner found (maybe voided?)
+                        continue
+
+                    # Get runner metadata to map selection_id to outcome
+                    catalogues = betfair.client.betting.list_market_catalogue(
+                        filter=filters.market_filter(market_ids=[market_id]),
+                        market_projection=["RUNNER_METADATA"],
+                    )
+
+                    if not catalogues:
+                        continue
+
+                    cat = catalogues[0]
+
+                    # Map selection_id to home/draw/away
+                    # Betfair order: Home, Away, Draw (but we need runner names)
+                    result_map = {}
+                    for runner in cat.runners:
+                        if runner.runner_name == "The Draw":
+                            result_map[runner.selection_id] = "D"
+                        elif runner.sort_priority == 1:
+                            result_map[runner.selection_id] = "H"
+                        elif runner.sort_priority == 2:
+                            result_map[runner.selection_id] = "A"
+
+                    actual_result = result_map.get(winner_selection_id)
+                    if not actual_result:
+                        continue
+
+                    # Settle all bets for this market
+                    market_bets = pending_df[pending_df["market_id"] == market_id]
+
+                    cursor = conn.cursor()
+                    for _, bet in market_bets.iterrows():
+                        sel_map = {"home": "H", "draw": "D", "away": "A"}
+                        won = actual_result == sel_map[bet["selection"]]
+                        profit = (
+                            (bet["stake"] * (bet["odds"] - 1)) if won else -bet["stake"]
+                        )
+                        status = "won" if won else "lost"
+
+                        # Update bet record
+                        cursor.execute(
+                            """
+                            UPDATE bets
+                            SET status = ?, settled_at = ?, actual_result = ?, profit = ?
+                            WHERE bet_id = ?
+                            """,
+                            (
+                                status,
+                                datetime.now().isoformat(),
+                                actual_result,
+                                profit,
+                                bet["bet_id"],
+                            ),
+                        )
+
+                        # Update bankroll
+                        self.bankroll.settle_bet(
+                            bet["stake"], bet["odds"], won, bet_id=bet["bet_id"]
+                        )
+
+                        status_str = "✓ WIN" if won else "✗ LOSS"
+                        print(
+                            f"  {bet['league']}: {bet['home_team']} vs {bet['away_team']} | "
+                            f"{bet['selection'].upper()} @ {bet['odds']:.2f} | "
+                            f"£{bet['stake']:.2f} | {status_str} (£{profit:+.2f})"
+                        )
+                        settled_count += 1
+
+                    conn.commit()
+
+                except Exception as e:
+                    logger.warning(f"Error checking market {market_id}: {e}")
+                    continue
+
+            betfair.logout()
+
+            if settled_count > 0:
+                print(f"\nSettled {settled_count} bets via Betfair")
+                self._print_summary()
+            else:
+                print("\nNo settled markets found - matches may still be in progress")
+
+        except Exception as e:
+            logger.error(f"Betfair settlement error: {e}")
+            print(f"Error connecting to Betfair: {e}")
+
+        conn.close()
 
     def _print_summary(self):
         """Print betting summary from database including CLV."""
@@ -1326,6 +1488,11 @@ def main():
     parser.add_argument(
         "--results", action="store_true", help="Settle yesterday's bets"
     )
+    parser.add_argument(
+        "--settle-betfair",
+        action="store_true",
+        help="Settle pending bets via Betfair (faster than --results)",
+    )
     parser.add_argument("--date", help="Date to settle (YYYY-MM-DD)")
     parser.add_argument("--status", action="store_true", help="Show bankroll status")
     parser.add_argument("--bets", action="store_true", help="Show recent bets")
@@ -1415,6 +1582,13 @@ def main():
     elif args.status:
         scanner = Scanner()
         scanner.show_status()
+
+    elif args.settle_betfair:
+        if not BETFAIR_AVAILABLE:
+            print("ERROR: betfairlightweight not installed")
+            return
+        scanner = Scanner()
+        scanner.settle_bets_betfair()
 
     elif args.results or args.date:
         scanner = Scanner()
