@@ -189,6 +189,28 @@ class DatabaseBankroll:
         if close_conn:
             conn.close()
 
+    def void_bet(self, stake: float, bet_id: int = None, conn=None):
+        """Void a bet (postponed match) - refund stake to bankroll."""
+        close_conn = conn is None
+        if conn is None:
+            conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Refund the stake
+        new_balance = self.bankroll + stake
+        notes = "Bet voided (match postponed)"
+
+        cursor.execute(
+            """
+            INSERT INTO bankroll (event_type, amount, balance_after, bet_id, notes)
+            VALUES ('bet_voided', ?, ?, ?, ?)
+            """,
+            (stake, new_balance, bet_id, notes),
+        )
+        conn.commit()
+        if close_conn:
+            conn.close()
+
     def status(self) -> Dict:
         """Return current status with proper separation of available cash and realised P&L."""
         current = self.bankroll
@@ -840,10 +862,41 @@ class Scanner:
             )
 
             if len(result_df) == 0:
-                print(f"  {bet['home_team']} vs {bet['away_team']} - Result not found")
+                # No result found - void the bet (likely postponed)
+                cursor.execute(
+                    """
+                    UPDATE bets
+                    SET status = 'void', settled_at = ?, profit = 0
+                    WHERE bet_id = ?
+                    """,
+                    (datetime.now().isoformat(), bet["bet_id"]),
+                )
+                self.bankroll.void_bet(bet["stake"], bet_id=bet["bet_id"], conn=conn)
+                print(
+                    f"  {bet['home_team']} vs {bet['away_team']} - "
+                    f"VOID (no result) | £{bet['stake']:.2f} refunded"
+                )
                 continue
 
             actual = result_df["full_time_result"].iloc[0]
+
+            # Check for null/NaN result (match may have been postponed)
+            if actual is None or (isinstance(actual, float) and pd.isna(actual)):
+                cursor.execute(
+                    """
+                    UPDATE bets
+                    SET status = 'void', settled_at = ?, profit = 0
+                    WHERE bet_id = ?
+                    """,
+                    (datetime.now().isoformat(), bet["bet_id"]),
+                )
+                self.bankroll.void_bet(bet["stake"], bet_id=bet["bet_id"], conn=conn)
+                print(
+                    f"  {bet['home_team']} vs {bet['away_team']} - "
+                    f"VOID (no result in DB) | £{bet['stake']:.2f} refunded"
+                )
+                continue
+
             sel_map = {"home": "H", "draw": "D", "away": "A"}
 
             # Get closing odds for CLV calculation
@@ -936,6 +989,7 @@ class Scanner:
             betfair.login()
 
             settled_count = 0
+            voided_count = 0
 
             for market_id in market_ids:
                 try:
@@ -962,7 +1016,30 @@ class Scanner:
                             break
 
                     if winning_selection_id is None:
-                        logger.warning(f"Market {market_id} closed but no winner found")
+                        # Market closed but no winner - void all bets for this market
+                        logger.warning(
+                            f"Market {market_id} closed but no winner - voiding bets"
+                        )
+                        market_bets = pending_df[pending_df["market_id"] == market_id]
+                        cursor = conn.cursor()
+                        for _, bet in market_bets.iterrows():
+                            cursor.execute(
+                                """
+                                UPDATE bets
+                                SET status = 'void', settled_at = ?, profit = 0
+                                WHERE bet_id = ?
+                                """,
+                                (datetime.now().isoformat(), bet["bet_id"]),
+                            )
+                            self.bankroll.void_bet(
+                                bet["stake"], bet_id=bet["bet_id"], conn=conn
+                            )
+                            print(
+                                f"  {bet['home_team']} vs {bet['away_team']} - "
+                                f"VOID (no winner) | £{bet['stake']:.2f} refunded"
+                            )
+                            voided_count += 1
+                        conn.commit()
                         continue
 
                     # Settle all bets for this market
@@ -1032,8 +1109,11 @@ class Scanner:
 
             betfair.logout()
 
-            if settled_count > 0:
-                print(f"\nSettled {settled_count} bets via Betfair")
+            if settled_count > 0 or voided_count > 0:
+                if settled_count > 0:
+                    print(f"\nSettled {settled_count} bets via Betfair")
+                if voided_count > 0:
+                    print(f"Voided {voided_count} bets (no winner/postponed)")
                 self._print_summary()
             else:
                 print("\nNo settled markets found - matches may still be in progress")
@@ -1264,6 +1344,12 @@ def main():
     parser.add_argument("--export", action="store_true", help="Export bets to CSV")
     parser.add_argument("--days", type=int, help="Days ahead to scan (default: 2)")
     parser.add_argument("--reset", action="store_true", help="Reset paper trading")
+    parser.add_argument(
+        "--void",
+        type=int,
+        metavar="BET_ID",
+        help="Void a bet by ID (for postponed matches - refunds stake)",
+    )
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose logging")
 
     args = parser.parse_args()
@@ -1282,6 +1368,53 @@ def main():
         # Re-initialize bankroll
         init_bankroll(INITIAL_BANKROLL)
         print(f"Paper trading reset. Starting bankroll: £{INITIAL_BANKROLL:.2f}")
+
+    elif args.void:
+        # Void a bet by ID (for postponed matches)
+        bet_id = args.void
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Get the bet details
+        cursor.execute(
+            "SELECT bet_id, home_team, away_team, selection, odds, stake, status FROM bets WHERE bet_id = ?",
+            (bet_id,),
+        )
+        bet = cursor.fetchone()
+
+        if not bet:
+            print(f"ERROR: Bet ID {bet_id} not found")
+            conn.close()
+            return
+
+        bet_id, home, away, selection, odds, stake, status = bet
+
+        if status != "pending":
+            print(f"ERROR: Bet {bet_id} is already {status}, cannot void")
+            conn.close()
+            return
+
+        # Update bet status to void
+        cursor.execute(
+            """
+            UPDATE bets
+            SET status = 'void', settled_at = ?, profit = 0
+            WHERE bet_id = ?
+            """,
+            (datetime.now().isoformat(), bet_id),
+        )
+        conn.commit()
+
+        # Refund stake to bankroll
+        bankroll = DatabaseBankroll()
+        bankroll.void_bet(stake, bet_id=bet_id, conn=conn)
+
+        conn.close()
+
+        print(f"\n✓ Bet {bet_id} voided: {home} vs {away}")
+        print(f"  Selection: {selection.upper()} @ {odds:.2f}")
+        print(f"  Stake refunded: £{stake:.2f}")
+        print(f"  New bankroll: £{bankroll.bankroll:.2f}")
 
     elif args.bets:
         bets = get_recent_bets(20)

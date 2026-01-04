@@ -154,6 +154,19 @@ class DiscordDashboard:
         self, stats: Dict, recent_bets: List[Dict], pending: List[Dict]
     ) -> bool:
         """Send comprehensive dashboard update."""
+        import math
+
+        def safe_profit(val):
+            """Safely format profit, handling None/NaN."""
+            if val is None:
+                return "pending"
+            try:
+                if math.isnan(val):
+                    return "pending"
+                return f"£{val:+.2f}"
+            except (TypeError, ValueError):
+                return "pending"
+
         profit = stats.get("total_profit", 0)
         main_color = 3066993 if profit >= 0 else 15158332
 
@@ -180,19 +193,13 @@ class DiscordDashboard:
             "timestamp": datetime.utcnow().isoformat(),
         }
 
-        if recent_bets:
+        # Filter to settled bets only for recent display
+        settled_bets = [b for b in recent_bets if b.get("status") in ("won", "lost")]
+        if settled_bets:
             results_text = ""
-            for bet in recent_bets[:10]:
-                emoji = (
-                    "✅"
-                    if bet.get("status") == "won"
-                    else "❌"
-                    if bet.get("status") == "lost"
-                    else "⏳"
-                )
-                profit_str = (
-                    f"£{bet.get('profit', 0):+.2f}" if bet.get("profit") else "pending"
-                )
+            for bet in settled_bets:
+                emoji = "✅" if bet.get("status") == "won" else "❌"
+                profit_str = safe_profit(bet.get("profit"))
                 results_text += f"{emoji} {bet['home_team'][:10]} vs {bet['away_team'][:10]} | {bet['selection'].upper()} @ {bet['odds']:.2f} | {profit_str}\n"
             results_embed = {
                 "title": "📋 RECENT BETS",
@@ -202,7 +209,7 @@ class DiscordDashboard:
         else:
             results_embed = {
                 "title": "📋 RECENT BETS",
-                "description": "No bets yet",
+                "description": "No settled bets yet",
                 "color": 9807270,
             }
 
@@ -241,19 +248,50 @@ def notify_bet_settled(bet: Dict):
 
 def send_dashboard_update():
     """Send full dashboard - call from cron or manually."""
+    from datetime import timedelta
+
+    import pandas as pd
+
     from src.data.db_writer import (
         get_bets_summary,
         get_current_bankroll,
-        get_recent_bets,
+        get_db_connection,
     )
 
     stats = get_bets_summary()
     stats["bankroll"] = get_current_bankroll()
-    # total_profit and roi already calculated from settled bets in get_bets_summary()
 
-    recent = get_recent_bets(10).to_dict("records")
-    pending_df = get_recent_bets(20)
-    pending = pending_df[pending_df["status"] == "pending"].to_dict("records")
+    conn = get_db_connection()
+
+    # Get settled bets from last 24 hours
+    yesterday = (datetime.now() - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+    recent_df = pd.read_sql(
+        """
+        SELECT bet_id, placed_at, league, match_date, home_team, away_team,
+               selection, odds, stake, edge, status, profit
+        FROM bets
+        WHERE placed_at >= ? AND status IN ('won', 'lost')
+        ORDER BY bet_id DESC
+        """,
+        conn,
+        params=(yesterday,),
+    )
+
+    # Get ALL pending bets (regardless of when placed)
+    pending_df = pd.read_sql(
+        """
+        SELECT bet_id, placed_at, league, match_date, home_team, away_team,
+               selection, odds, stake, edge, status, profit
+        FROM bets
+        WHERE status = 'pending'
+        ORDER BY match_date ASC
+        """,
+        conn,
+    )
+    conn.close()
+
+    recent = recent_df.to_dict("records")
+    pending = pending_df.to_dict("records")
 
     dashboard.send_full_dashboard(stats, recent, pending)
 
